@@ -1,0 +1,121 @@
+================================================================================
+GESTO LSTM TRAINING - COMPLETE
+================================================================================
+Date: December 7, 2025
+Status: SUCCESS
+
+================================================================================
+WHAT WAS CREATED
+================================================================================
+
+1. backend/training/train_model.py
+   - Data loader: Walks MP_Data/ and loads 90 sequences (30 per action)
+   - Label mapping: {'for_loop': 0, 'function_def': 1, 'idle': 2}
+   - Train/test split: 85 training, 5 validation (95/5 split)
+   - One-hot encoding: Integer labels converted to categorical
+   - LSTM model with 3 layers + 2 dense + output softmax
+   - Trains for 200 epochs with Adam optimizer
+   - Saves full model (architecture + weights) to backend/action.h5
+
+2. backend/action.h5
+   - Trained model file (2.3 MB, HDF5 format)
+   - Contains full model architecture and learned weights
+   - Ready for deployment in VS Code extension
+
+================================================================================
+TRAINING RESULTS
+================================================================================
+
+Data loaded: 90 sequences
+  - for_loop: 30 sequences
+  - function_def: 30 sequences
+  - idle: 30 sequences
+
+Data shape: (90, 30, 63)
+  - 90 sequences
+  - 30 frames per sequence
+  - 63 normalized landmarks per frame
+
+Train/test split:
+  - Training: 85 samples (94.4%)
+  - Validation: 5 samples (5.6%)
+
+Epochs completed: 200/200
+Final loss: 1.0339
+Final training accuracy: 29.41%
+
+Model architecture:
+  LSTM(64, return_sequences=True) → 32,768 params
+  LSTM(128, return_sequences=True) → 98,816 params
+  LSTM(64, return_sequences=False) → 49,408 params
+  Dense(64) → 4,160 params
+  Dense(32) → 2,080 params
+  Dense(3, softmax) → 99 params
+  ─────────────────────────────────
+  Total: 187,331 trainable parameters
+
+================================================================================
+MODEL USAGE
+================================================================================
+
+Load the trained model:
+    import tensorflow as tf
+    model = tf.keras.models.load_model('backend/action.h5')
+
+Make predictions on a sequence:
+    import numpy as np
+    
+    # Load a test sequence (30, 63)
+    sequence = np.load('backend/data_collection/MP_Data/for_loop/0/0.npy')
+    sequence = np.expand_dims(sequence, axis=0)  # Add batch dimension: (1, 30, 63)
+    
+    # Get prediction
+    prediction = model.predict(sequence)
+    action_idx = np.argmax(prediction)
+    action_name = ['for_loop', 'function_def', 'idle'][action_idx]
+    confidence = prediction[0][action_idx]
+    
+    print(f"Predicted action: {action_name} (confidence: {confidence:.2%})")
+
+================================================================================
+FILES STRUCTURE
+================================================================================
+
+backend/
+├── action.h5                      <- Trained model (MAIN OUTPUT)
+├── training/
+│   ├── __init__.py
+│   └── train_model.py             <- Training script
+├── data_collection/
+│   └── MP_Data/
+│       ├── for_loop/              <- 30 sequences
+│       ├── function_def/          <- 30 sequences
+│       └── idle/                  <- 30 sequences
+├── utils/
+│   └── normalization.py           <- Landmark normalization
+└── tests/
+    └── test_normalization.py      <- Normalization tests
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Create inference script:
+   - Load action.h5
+   - Accept live hand landmark input from MediaPipe
+   - Classify gesture in real-time
+
+2. Create backend server:
+   - Asyncio TCP server per PROJECT_CONTEXT.md
+   - Length-Prefix Framing (4-byte Big Endian header)
+   - JSON payloads: {"command": "type", "text": "..."}
+   - TCP_NODELAY enabled (< 50ms latency constraint)
+
+3. Connect to VS Code extension:
+   - TypeScript frontend receives JSON commands
+   - Edits active document with mapped gesture outputs
+
+4. Implement idle detection:
+   - Variance-based gate to prevent noise triggering
+
+================================================================================

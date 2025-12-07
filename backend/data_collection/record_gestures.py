@@ -1,41 +1,24 @@
 """
-Gesture Data Collection Script
+Gesture Data Collection Script - Hand Detection Edition
 
-This script captures video sequences of hand gestures, normalizes the landmarks,
-and saves them to disk for training the gesture recognition LSTM model.
+This script captures video sequences of hand gestures using MediaPipe Hands,
+normalizes the landmarks, and saves them to disk for training.
+
+Uses mp.solutions.hands.Hands for more stable hand detection.
 
 Usage:
     python -m backend.data_collection.record_gestures
-
-The script will:
-1. Open a webcam feed
-2. Loop through each gesture action
-3. For each action, record 30 video sequences
-4. For each sequence, capture 30 frames
-5. Normalize landmarks using Bone-Metric Scaling
-6. Save normalized data as .npy files
-
-Directory Structure Created:
-    MP_Data/
-    ├── for_loop/
-    │   ├── 0/
-    │   │   ├── 0.npy
-    │   │   ├── 1.npy
-    │   │   └── ...
-    │   ├── 1/
-    │   └── ...
-    ├── function_def/
-    └── idle/
 """
 
 import cv2
 import numpy as np
-import os
 import mediapipe as mp
 from pathlib import Path
+import shutil
 import sys
+from time import time
 
-# Import the normalization function
+# Import normalization function
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.utils.normalization import normalize_landmarks
 
@@ -44,50 +27,50 @@ from backend.utils.normalization import normalize_landmarks
 # CONFIGURATION
 # ============================================================================
 
-# Define the root path for storing collected data
+# Data storage path
 MP_DATA_PATH = Path(__file__).parent / "MP_Data"
 
-# List of gesture actions to record
-actions = np.array(['for_loop', 'function_def', 'idle'])
+# Gesture actions to record
+actions = np.array(['for_loop', 'idle'])
 
-# Number of videos (sequences) to record per action
-no_sequences = 30
+# Sequences per action
+no_sequences = 100
 
-# Number of frames to capture per video
+# Frames per sequence
 sequence_length = 30
 
-# Pause duration (milliseconds) between sequences to allow hand reset
+# Pause between sequences (ms) for hand reset
 SEQUENCE_PAUSE_MS = 2000
 
-# Window display settings
-WINDOW_NAME = "Gesto - Gesture Data Collection"
-DISPLAY_FPS = 30
+# MediaPipe Hands configuration
+HANDS_CONFIG = {
+    'static_image_mode': False,
+    'max_num_hands': 1,
+    'min_detection_confidence': 0.7,
+    'min_tracking_confidence': 0.5
+}
+
+# Display settings
+WINDOW_NAME = "Gesto - Hand Gesture Recorder"
 
 
 # ============================================================================
-# MEDIAPIPE INITIALIZATION
+# INITIALIZATION
 # ============================================================================
 
 def initialize_mediapipe():
-    """
-    Initialize MediaPipe Holistic model for hand, pose, and face detection.
-    
-    Returns:
-        holistic: MediaPipe Holistic instance
-        mp_drawing: MediaPipe drawing utilities
-    """
-    mp_holistic = mp.solutions.holistic
+    """Initialize MediaPipe Hands and drawing utilities."""
+    mp_hands = mp.solutions.hands
     mp_drawing = mp.solutions.drawing_utils
     
-    holistic = mp_holistic.Holistic(
-        static_image_mode=False,
-        model_complexity=1,
-        smooth_landmarks=True,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
+    hands = mp_hands.Hands(
+        static_image_mode=HANDS_CONFIG['static_image_mode'],
+        max_num_hands=HANDS_CONFIG['max_num_hands'],
+        min_detection_confidence=HANDS_CONFIG['min_detection_confidence'],
+        min_tracking_confidence=HANDS_CONFIG['min_tracking_confidence']
     )
     
-    return holistic, mp_drawing
+    return hands, mp_drawing
 
 
 # ============================================================================
@@ -95,139 +78,134 @@ def initialize_mediapipe():
 # ============================================================================
 
 def setup_directories():
-    """
-    Create the MP_Data directory structure for storing collected data.
-    """
-    # Create root MP_Data directory
-    MP_DATA_PATH.mkdir(parents=True, exist_ok=True)
-    print(f"✓ Root directory created: {MP_DATA_PATH}")
+    """Create MP_Data directory structure, overwriting old data."""
+    # Remove old data if exists
+    if MP_DATA_PATH.exists():
+        shutil.rmtree(MP_DATA_PATH)
+        print(f"✓ Removed old data directory")
     
-    # Create subdirectories for each action
+    # Create root directory
+    MP_DATA_PATH.mkdir(parents=True, exist_ok=True)
+    print(f"✓ Created root directory: {MP_DATA_PATH}")
+    
+    # Create action subdirectories and sequence folders
     for action in actions:
         action_path = MP_DATA_PATH / action
         action_path.mkdir(parents=True, exist_ok=True)
-        print(f"  ✓ Action directory created: {action_path}")
+        print(f"  ✓ Action '{action}'")
         
-        # Create subdirectories for each sequence
         for seq_num in range(no_sequences):
             seq_path = action_path / str(seq_num)
             seq_path.mkdir(parents=True, exist_ok=True)
     
-    print(f"\n✓ Directory structure setup complete!")
-    print(f"  Total: {len(actions)} actions × {no_sequences} sequences × {sequence_length} frames\n")
+    print(f"\n✓ Directory structure ready")
+    print(f"  Will record {no_sequences} sequences × {len(actions)} actions")
+    print(f"  Each sequence: {sequence_length} frames\n")
 
 
 # ============================================================================
-# LANDMARK EXTRACTION AND PROCESSING
+# HAND DETECTION & NORMALIZATION
 # ============================================================================
 
-def extract_hand_landmarks(results):
+def extract_hand_keypoints(results):
     """
-    Extract hand landmarks from MediaPipe detection results.
+    Extract hand keypoints from MediaPipe results.
     
     Args:
-        results: MediaPipe Holistic detection results
+        results: MediaPipe Hands detection results
     
     Returns:
-        landmarks: (21, 3) array of hand landmarks, or None if not detected
+        Normalized (63,) keypoint array, or None if no hand detected
     """
-    if results.right_hand_landmarks is None:
+    # Check if hand was detected
+    if not results.multi_hand_landmarks:
         return None
     
-    # Extract right hand landmarks
-    landmarks = np.array([
-        [lm.x, lm.y, lm.z] for lm in results.right_hand_landmarks.landmark
-    ], dtype=np.float32)
+    # Extract first hand detected
+    hand_landmarks = results.multi_hand_landmarks[0]
     
-    return landmarks
+    # Convert to numpy array (21 landmarks × 3 coords = 63 values)
+    keypoints = np.array([
+        [landmark.x, landmark.y, landmark.z]
+        for landmark in hand_landmarks.landmark
+    ]).flatten()
+    
+    # Normalize using bone-metric scaling
+    keypoints = normalize_landmarks(keypoints)
+    
+    return keypoints
 
 
-def process_landmarks(landmarks):
+def is_valid_data(keypoints):
     """
-    Process raw landmarks through normalization.
+    Check if keypoint data is valid (not all zeros).
     
     Args:
-        landmarks: (21, 3) array of hand landmarks, or None
+        keypoints: (63,) normalized keypoint array
     
     Returns:
-        normalized: (63,) array of normalized landmarks, or zero array if not detected
+        True if valid, False if all zeros (hand not detected)
     """
-    if landmarks is None:
-        # Return zero array if no hand detected
-        return np.zeros((63,), dtype=np.float32)
+    if keypoints is None:
+        return False
     
-    try:
-        # Apply normalization
-        normalized = normalize_landmarks(landmarks)
-        return normalized.astype(np.float32)
-    except Exception as e:
-        print(f"  Warning: Normalization failed: {e}")
-        return np.zeros((63,), dtype=np.float32)
+    return np.max(np.abs(keypoints)) > 0
 
 
 # ============================================================================
-# VIDEO CAPTURE AND DISPLAY
+# DRAWING UTILITIES
 # ============================================================================
 
-def draw_status_text(frame, text, color=(0, 255, 0), position="top"):
-    """
-    Draw status text on the video frame.
-    
-    Args:
-        frame: Input image frame
-        text: Text to display
-        color: BGR color tuple
-        position: 'top' or 'bottom'
-    
-    Returns:
-        frame: Frame with text overlay
-    """
+def draw_hand_skeleton(frame, results, mp_drawing):
+    """Draw hand landmarks and connections on frame."""
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp_drawing.draw_landmarks(
+                frame,
+                hand_landmarks,
+                mp.solutions.hands.HAND_CONNECTIONS,
+                mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2)
+            )
+
+
+def draw_status(frame, text, position=(10, 30), color=(0, 255, 0), size=0.7):
+    """Draw status text on frame."""
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 1.2
-    thickness = 2
-    
-    # Get text size to center it
-    text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
-    frame_h, frame_w = frame.shape[:2]
-    
-    if position == "top":
-        x = (frame_w - text_size[0]) // 2
-        y = 50
-    else:  # bottom
-        x = (frame_w - text_size[0]) // 2
-        y = frame_h - 30
-    
-    # Add background rectangle for better visibility
-    bg_padding = 10
-    cv2.rectangle(frame, 
-                  (x - bg_padding, y - text_size[1] - bg_padding),
-                  (x + text_size[0] + bg_padding, y + bg_padding),
-                  (0, 0, 0), -1)
-    
-    # Put text
-    cv2.putText(frame, text, (x, y), font, font_scale, color, thickness)
-    
+    cv2.putText(frame, text, position, font, size, color, 2)
+    return frame
+
+
+def draw_error(frame, text, position=(10, 60)):
+    """Draw error text in red."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(frame, text, position, font, 1.0, (0, 0, 255), 3)
     return frame
 
 
 # ============================================================================
-# MAIN DATA COLLECTION LOOP
+# MAIN COLLECTION LOOP
 # ============================================================================
 
 def collect_gesture_data():
-    """
-    Main function to collect gesture training data.
-    """
+    """Main function to collect gesture data."""
+    
+    # Safety confirmation
     print("\n" + "=" * 70)
-    print("GESTO - GESTURE DATA COLLECTION")
+    print("⚠️  WARNING: This will delete all old data in MP_Data/")
+    print("=" * 70)
+    input("Press Enter to continue or Ctrl+C to cancel...\n")
+    
+    print("=" * 70)
+    print("GESTO - HAND GESTURE DATA COLLECTION")
     print("=" * 70)
     
     # Setup directories
     setup_directories()
     
     # Initialize MediaPipe
-    print("Initializing MediaPipe Holistic model...")
-    holistic, mp_drawing = initialize_mediapipe()
+    print("Initializing MediaPipe Hands...")
+    hands, mp_drawing = initialize_mediapipe()
     print("✓ MediaPipe initialized\n")
     
     # Initialize webcam
@@ -238,7 +216,7 @@ def collect_gesture_data():
         print("❌ Error: Could not open webcam")
         return
     
-    # Set camera resolution for better performance
+    # Set camera resolution
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
@@ -254,117 +232,118 @@ def collect_gesture_data():
         for action_idx, action in enumerate(actions):
             print(f"\n{'=' * 70}")
             print(f"ACTION {action_idx + 1}/{len(actions)}: {action.upper()}")
-            print(f"{'=' * 70}")
+            print(f"Recording sequences 0-{no_sequences - 1}")
+            print(f"{'=' * 70}\n")
             
             for sequence_idx in range(no_sequences):
-                print(f"  Sequence {sequence_idx + 1}/{no_sequences}...", end=" ", flush=True)
+                print(f"  Sequence {sequence_idx}/{no_sequences}...", end=" ", flush=True)
                 
-                # Wait for 2 seconds before starting sequence collection
-                # This allows the user to prepare their hand gesture
+                # Wait for hand reset (preparation phase)
                 print("(preparing)", end="", flush=True)
                 
-                frame_count = 0
-                start_wait_time = cv2.getTickCount()
-                
-                while frame_count < SEQUENCE_PAUSE_MS:
+                start_wait_time = time()
+                while (time() - start_wait_time) * 1000 < SEQUENCE_PAUSE_MS:
                     success, frame = cap.read()
                     if not success:
                         break
                     
-                    # Flip frame for selfie view
                     frame = cv2.flip(frame, 1)
                     
-                    # Display preparation message
-                    frame = draw_status_text(
-                        frame,
-                        f"Get Ready for {action} (seq {sequence_idx + 1})",
-                        color=(0, 165, 255),  # Orange
-                        position="top"
-                    )
+                    # Detect hand
+                    results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    draw_hand_skeleton(frame, results, mp_drawing)
                     
-                    # Show countdown
-                    elapsed = int((cv2.getTickCount() - start_wait_time) / cv2.getTickFrequency() * 1000)
-                    remaining = max(0, SEQUENCE_PAUSE_MS - elapsed)
-                    frame = draw_status_text(
-                        frame,
-                        f"Starting in {remaining // 1000 + 1}s",
-                        color=(0, 165, 255),
-                        position="bottom"
-                    )
+                    # Show preparation message
+                    frame = draw_status(frame, "PREPARE YOUR HAND", (10, 30), (0, 255, 0))
+                    elapsed_ms = int((time() - start_wait_time) * 1000)
+                    remaining_s = max(0, 2 - (elapsed_ms // 1000))
+                    frame = draw_status(frame, f"Starting in {remaining_s}s...", (10, 70), (0, 255, 0))
+                    
+                    if not results.multi_hand_landmarks:
+                        frame = draw_error(frame, "NO HAND DETECTED", (350, 360))
                     
                     cv2.imshow(WINDOW_NAME, frame)
-                    key = cv2.waitKey(30) & 0xFF
-                    if key == ord('q'):
-                        raise KeyboardInterrupt("User quit")
                     
-                    frame_count = int((cv2.getTickCount() - start_wait_time) / cv2.getTickFrequency() * 1000)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        raise KeyboardInterrupt
                 
-                # Now collect frames for this sequence
-                frames_collected = 0
-                frame_start_time = cv2.getTickCount()
+                # Recording phase
+                sequence_data = []
+                frames_recorded = 0
                 
-                while frames_collected < sequence_length:
+                while frames_recorded < sequence_length:
                     success, frame = cap.read()
                     if not success:
                         break
                     
-                    # Flip frame for selfie view
                     frame = cv2.flip(frame, 1)
                     
-                    # Process frame with MediaPipe
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    results = holistic.process(frame_rgb)
+                    # Detect hand
+                    results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    draw_hand_skeleton(frame, results, mp_drawing)
                     
-                    # Extract and normalize landmarks
-                    landmarks = extract_hand_landmarks(results)
-                    normalized_data = process_landmarks(landmarks)
+                    # Extract and validate keypoints
+                    keypoints = extract_hand_keypoints(results)
                     
-                    # Save normalized data
-                    save_path = MP_DATA_PATH / action / str(sequence_idx) / f"{frames_collected}.npy"
-                    np.save(str(save_path), normalized_data)
-                    
-                    # Display collection message
-                    frame = draw_status_text(
-                        frame,
-                        f"Collecting {action} - Frame {frames_collected + 1}/{sequence_length}",
-                        color=(0, 255, 0),  # Green
-                        position="top"
-                    )
-                    
-                    # Show progress bar
-                    progress = frames_collected / sequence_length
-                    frame = draw_status_text(
-                        frame,
-                        f"Progress: {int(progress * 100)}%",
-                        color=(0, 255, 0),
-                        position="bottom"
-                    )
+                    if is_valid_data(keypoints):
+                        # Valid frame - save it
+                        sequence_data.append(keypoints)
+                        frames_recorded += 1
+                        
+                        # Show recording status
+                        frame = draw_status(
+                            frame,
+                            f"Recording: Sequence {sequence_idx}/100, Frame {frames_recorded}/{sequence_length}",
+                            (10, 30),
+                            (0, 255, 0)
+                        )
+                    else:
+                        # Invalid frame - skip it
+                        frame = draw_error(frame, "SKIPPING FRAME - NO HAND", (250, 360))
+                        
+                        # Show status anyway
+                        frame = draw_status(
+                            frame,
+                            f"Waiting for hand... ({frames_recorded}/{sequence_length} frames captured)",
+                            (10, 30),
+                            (0, 165, 255)
+                        )
                     
                     cv2.imshow(WINDOW_NAME, frame)
-                    key = cv2.waitKey(30) & 0xFF
-                    if key == ord('q'):
-                        raise KeyboardInterrupt("User quit")
                     
-                    frames_collected += 1
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        raise KeyboardInterrupt
                 
-                print("✓")
+                # Save sequence to disk
+                if len(sequence_data) == sequence_length:
+                    action_path = MP_DATA_PATH / action
+                    seq_path = action_path / str(sequence_idx)
+                    
+                    for frame_idx, keypoints in enumerate(sequence_data):
+                        frame_path = seq_path / f"{frame_idx}.npy"
+                        np.save(frame_path, keypoints)
+                    
+                    print(" ✓ SAVED")
+                else:
+                    print(f" ❌ FAILED (only {len(sequence_data)}/{sequence_length} frames)")
         
+        # Summary
         print(f"\n{'=' * 70}")
         print("✓ DATA COLLECTION COMPLETE!")
         print(f"{'=' * 70}")
         print(f"\nSaved to: {MP_DATA_PATH}")
-        print(f"Total files created: {len(actions)} × {no_sequences} × {sequence_length} = {len(actions) * no_sequences * sequence_length} .npy files")
+        print(f"Total sequences: {len(actions)} × {no_sequences} = {len(actions) * no_sequences}")
+        print(f"Total files: {len(actions) * no_sequences * sequence_length} .npy files")
         
     except KeyboardInterrupt:
-        print("\n\n⚠ Data collection interrupted by user")
+        print("\n\n⚠️  Data collection interrupted by user")
     except Exception as e:
-        print(f"\n\n❌ Error during data collection: {e}")
+        print(f"\n\n❌ Error during collection: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        # Cleanup
         print("\nCleaning up...")
-        holistic.close()
+        hands.close()
         cap.release()
         cv2.destroyAllWindows()
         print("✓ Cleanup complete")
