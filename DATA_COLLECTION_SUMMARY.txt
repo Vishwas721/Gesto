@@ -1,0 +1,198 @@
+================================================================================
+GESTO - GESTURE DATA COLLECTION SCRIPT
+================================================================================
+Date: December 7, 2025
+Status: READY TO USE
+
+================================================================================
+WHAT WAS CREATED
+================================================================================
+
+1. backend/data_collection/record_gestures.py (Main Script)
+   - Records video sequences of hand gestures
+   - Detects hand landmarks using MediaPipe Holistic
+   - Normalizes landmarks on-the-fly using Bone-Metric Scaling
+   - Saves normalized data as .npy files
+   - Interactive UI with countdown timers and visual feedback
+
+2. backend/utils/normalization.py (Utility Function)
+   - normalize_landmarks() function for scale-invariant normalization
+   - Translates wrist to origin (0,0,0)
+   - Scales by Wrist-to-Middle-MCP distance = 1.0
+   - Returns flattened (63,) array
+
+3. backend/data_collection/README.md (Documentation)
+   - Complete guide for using the data collection script
+   - Tips for recording quality data
+   - Troubleshooting section
+
+4. Supporting files:
+   - backend/__init__.py
+   - backend/data_collection/__init__.py
+   - backend/tests/test_normalization.py (Verified working)
+
+================================================================================
+HOW TO RUN
+================================================================================
+
+Command:
+    python -m backend.data_collection.record_gestures
+
+The script will:
+    1. Create MP_Data directory structure if it doesn't exist
+    2. Display: "Get Ready for for_loop"
+    3. Wait 2 seconds (countdown shown)
+    4. Record 30 frames of your for_loop gesture
+    5. Repeat for all 30 sequences
+    6. Move to next gesture (function_def, then idle)
+    7. Save 2,700 .npy files total
+
+Directory structure created:
+    MP_Data/
+    ├── for_loop/
+    │   ├── 0/ (30 frames)
+    │   ├── 1/ (30 frames)
+    │   └── ... (30 sequences)
+    ├── function_def/
+    │   └── ...
+    └── idle/
+        └── ...
+
+================================================================================
+DATA COLLECTION GESTURES (MVP)
+================================================================================
+
+For Loop:
+    - Make a CIRCULAR motion with your hand
+    - Smooth, consistent circle
+    - Record 30 sequences
+
+Function Definition:
+    - Draw a BOX/SQUARE shape in the air
+    - Clear corners and edges
+    - Record 30 sequences
+
+Idle:
+    - RANDOM, aimless hand movement
+    - No specific gesture
+    - Record 30 sequences
+
+================================================================================
+OUTPUT DATA FORMAT
+================================================================================
+
+Each .npy file contains:
+    - Shape: (63,) - 21 hand joints × 3 coordinates (x, y, z)
+    - Data type: float32
+    - Normalized using Bone-Metric Scaling (scale-invariant)
+
+Example usage:
+    import numpy as np
+    
+    # Load a single frame
+    frame = np.load("MP_Data/for_loop/0/0.npy")
+    print(frame.shape)  # (63,)
+    
+    # Load entire sequence
+    sequence = []
+    for i in range(30):
+        sequence.append(np.load(f"MP_Data/for_loop/0/{i}.npy"))
+    sequence = np.array(sequence)  # Shape: (30, 63)
+
+================================================================================
+KEY FEATURES
+================================================================================
+
+✓ Real-time hand detection with MediaPipe Holistic
+✓ Automatic on-the-fly normalization (Bone-Metric Scaling)
+✓ Scale-invariant recognition (works at any distance)
+✓ Interactive UI with visual feedback
+✓ 2-second pause between sequences for hand reset
+✓ Organized directory structure
+✓ Comprehensive error handling
+✓ Keyboard control (press Q to quit)
+✓ Progress tracking (frame count, percentage)
+
+================================================================================
+DEPENDENCIES
+================================================================================
+
+Installed:
+    - opencv-python (cv2)
+    - mediapipe (MediaPipe Holistic)
+    - numpy (array operations)
+
+Not installed (TensorFlow - will be installed later for training):
+    - tensorflow (for LSTM training)
+
+Install command (if needed):
+    pip install -r backend/requirements.txt
+
+================================================================================
+TESTING
+================================================================================
+
+Normalization tests: PASSED
+    ✓ Wrist at origin [0,0,0]
+    ✓ Reference bone distance = 1.0
+    ✓ Scale invariance verified
+    ✓ Output shape (63,)
+    ✓ Error handling
+
+Script imports: VERIFIED
+Configuration: VERIFIED
+Directory structure: READY
+
+================================================================================
+TIPS FOR BEST RESULTS
+================================================================================
+
+1. Lighting
+   - Ensure good lighting for hand detection
+   - Avoid shadows on your hand
+
+2. Consistency
+   - Perform gestures at similar speeds
+   - Keep hand position consistent within each sequence
+
+3. Distance and angle
+   - Record at multiple distances from camera
+   - Record at different angles for robustness
+
+4. Preparation
+   - Use the 2-second pause to reset hand position
+   - Don't start gesture until you see "Collecting..."
+
+5. Background
+   - Use neutral background without clutter
+   - Avoid high contrast backgrounds
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+"Could not open webcam"
+    - Check if webcam is connected
+    - Close other applications using camera
+    - Try restarting the script
+
+"ModuleNotFoundError: No module named 'mediapipe'"
+    - Run: pip install -r backend/requirements.txt
+    - Or: pip install opencv-python mediapipe numpy
+
+Hand detection not working
+    - Ensure adequate lighting
+    - Get entire hand in frame
+    - Try different distance from camera
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+After collecting data:
+    1. Use backend/training/train_gesture_model.py to train LSTM
+    2. Evaluate model performance
+    3. Export trained model
+    4. Connect to VS Code extension frontend
+
+================================================================================
